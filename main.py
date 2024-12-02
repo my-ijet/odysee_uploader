@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import glob
+import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
@@ -24,9 +25,9 @@ with open('auth') as f:
 
 time_1s = 1000          # 1 seconds
 time_1m = time_1s * 60  # 1 minute
-wait_time = time_1s * 3
-wait_login = time_1s * 3
-wait_between_uploads = time_1m * 2
+page_try_wait_time = time_1s * 3
+page_wait_login = time_1s * 3
+wait_between_upload_seconds = 60 * 5
 
 usr_state = 'state.json'
 should_authenticate = False
@@ -61,15 +62,11 @@ with sync_playwright() as p:
         page.fill('input#password', password)
         page.click('button[type=submit]')
         
-        page.wait_for_timeout(wait_login)
+        page.wait_for_timeout(page_wait_login)
         print('Logged in. Saving credentials')
         browser.contexts[0].storage_state(path=usr_state)
         page.close()
 
-    context = browser.new_context(storage_state=usr_state,
-                                  viewport={'width': 1920, 'height': 1080})
-    page = context.new_page()
-    
     files_list = sorted(glob.glob(os.path.join(dir_upload, f'*{VIDEO_EXT}')), reverse=True)
     last_file = files_list[-1]
     
@@ -86,7 +83,10 @@ with sync_playwright() as p:
 
         print(f'Found: {base_name}')
         print('│ Go to uploading')
-        page.goto('https://odysee.com/') # refresh page
+        context = browser.new_context(storage_state=usr_state,
+                                  viewport={'width': 1920, 'height': 1080})
+        page = context.new_page()
+
         page.goto('https://odysee.com/$/upload', timeout=0) # open upload
         page.wait_for_load_state('domcontentloaded')
         
@@ -120,7 +120,7 @@ with sync_playwright() as p:
         # fill in publish date
         for _ in range(5):
             try:
-                page.locator('div.react-datetime-picker__inputGroup').locator('input[name="year"]').click(timeout=wait_time)
+                page.locator('div.react-datetime-picker__inputGroup').locator('input[name="year"]').click(timeout=page_try_wait_time)
                 print('│ Filling in publish date')
                 page.keyboard.type(f"{datetime_upload.year:04}")
                 page.keyboard.type(f"{datetime_upload.month:02}")
@@ -153,7 +153,9 @@ with sync_playwright() as p:
         shutil.move(description_abs_path, dir_uploaded)
         print('╘═Done═╛')
         
-        if video_file_abs_path != last_file:
-            print(f'Waiting {wait_between_uploads // time_1m} minutes...')
-            page.wait_for_timeout(wait_between_uploads)
+        page.close()
+        context.close()
         
+        if video_file_abs_path != last_file:
+            print(f'Waiting {wait_between_upload_seconds // time_1m} minutes...')
+            time.sleep(wait_between_upload_seconds)
