@@ -157,5 +157,5 @@ with sync_playwright() as p:
         context.close()
         
         if video_file_abs_path != last_file:
-            print(f'Waiting {wait_between_upload_seconds // time_1m} minutes...')
+            print(f'Waiting {wait_between_upload_seconds // 60} minutes...')
             time.sleep(wait_between_upload_seconds)
