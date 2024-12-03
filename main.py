@@ -1,21 +1,22 @@
 #!/bin/env python
 import json
 import os
+import pathlib
 import shutil
-import glob
 import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-dir_upload = 'upload'
-dir_uploaded = 'uploaded'
-os.makedirs(dir_upload, exist_ok=True)
-os.makedirs(dir_uploaded, exist_ok=True)
+dir_upload = pathlib.Path('upload')
+dir_uploaded = pathlib.Path('uploaded')
+dir_upload.mkdir(parents=True, exist_ok=True)
+dir_uploaded.mkdir(parents=True, exist_ok=True)
 
-VIDEO_EXT = '.webm'
-VIDEO_EXT_LEN = len(VIDEO_EXT)
+TIMESTAMP_LEN = 10
+VIDEO_EXT = ['.webm', '.mp4', '.mkv']
 THUMB_EXT = '.webp'
 DESC_EXT = '.description'
+
 with open('tags') as f:
     TAGS = f.readline().strip()
 
@@ -24,7 +25,6 @@ with open('auth') as f:
     password = f.readline().strip()
 
 time_1s = 1000          # 1 seconds
-time_1m = time_1s * 60  # 1 minute
 page_try_wait_time = time_1s * 3
 page_wait_login = time_1s * 3
 wait_between_upload_seconds = 60 * 5
@@ -67,24 +67,30 @@ with sync_playwright() as p:
         browser.contexts[0].storage_state(path=usr_state)
         page.close()
 
-    files_list = sorted(glob.glob(os.path.join(dir_upload, f'*{VIDEO_EXT}')), reverse=True)
+    files_list: list[pathlib.Path] = []
+    for ext in VIDEO_EXT:
+        files_list += sorted(dir_upload.glob(f'*{ext}'), reverse=True)
+    if not files_list:
+        print('No video files found')
+        exit()
     last_file = files_list[-1]
     
-    for video_file_abs_path in files_list:
-        base_dir = os.path.dirname(video_file_abs_path)
-        video_file = os.path.basename(video_file_abs_path)
-        datetime_upload = datetime.fromtimestamp(int(video_file[:10]))
-        base_name = video_file[:-VIDEO_EXT_LEN]
-        thumb_file_abs_path = os.path.join(base_dir,base_name + THUMB_EXT)
+    for video_file in files_list:
+        video_file_abs_path = video_file.resolve()
+        base_dir = video_file.parent
+        base_name = video_file.stem
+        datetime_upload = datetime.fromtimestamp(int(video_file.name[:TIMESTAMP_LEN]))
+        
+        thumb_file_abs_path = base_dir.joinpath(base_name + THUMB_EXT).resolve()
 
-        description_abs_path = os.path.join(base_dir, base_name + DESC_EXT)
-        with open(description_abs_path, 'r') as file:
-            description = file.read()
-
+        description_abs_path = base_dir.joinpath(base_name + DESC_EXT).resolve()
+        with open(description_abs_path, 'r') as f:
+            description = f.read()
+        
         print(f'Found: {base_name}')
         print('│ Go to uploading')
         context = browser.new_context(storage_state=usr_state,
-                                  viewport={'width': 1920, 'height': 1080})
+                                      viewport={'width': 1920, 'height': 1080})
         page = context.new_page()
 
         page.goto('https://odysee.com/$/upload', timeout=0) # open upload
@@ -98,8 +104,8 @@ with sync_playwright() as p:
         print('│ Filling in metadata:')
         print('│  title, ', end='')
         # fill in title
-        page.locator('input[name="content_title"]').fill(base_name[11:])
-        video_title_fixed = page.locator('input[name="content_name"]').input_value()[11:]
+        page.locator('input[name="content_title"]').fill(base_name[TIMESTAMP_LEN+1:])
+        video_title_fixed = page.locator('input[name="content_name"]').input_value()[TIMESTAMP_LEN+1:]
         page.locator('input[name="content_name"]').fill(video_title_fixed)
         
         print('description, ', end='')
@@ -140,7 +146,7 @@ with sync_playwright() as p:
         print('│ Publishing')
         page.keyboard.down('End')
         page.locator('div.publish__actions button.button--primary').click() # publish button
-        page.locator('div.ReactModalPortal button.button--primary').click() # accept
+        page.locator('div.ReactModalPortal button.button--primary').click(timeout=0) # accept
         
         print('│ Waiting for video to be uploaded...')
         # wait for video to be uploaded for eternity
